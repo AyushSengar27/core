@@ -1,7 +1,8 @@
-"""The methods for loading Home Assistant integrations.
+"""
+The methods for loading Home Assistant integrations.
 
-This module has quite some complex parts. I have tried to add as much
-documentation as possible to keep it understandable.
+This module contains several complex parts. The documentation has been 
+expanded to improve clarity and understanding.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import pathlib
 import sys
 import time
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, cast
 
 from awesomeversion import (
     AwesomeVersion,
@@ -39,31 +40,19 @@ from .generated.mqtt import MQTT
 from .generated.ssdp import SSDP
 from .generated.usb import USB
 from .generated.zeroconf import HOMEKIT, ZEROCONF
-from .helpers.json import json_bytes, json_fragment
+from .helpers.json import json_fragment
 from .helpers.typing import UNDEFINED
 from .util.hass_dict import HassKey
 from .util.json import JSON_DECODE_EXCEPTIONS, json_loads
 
 if TYPE_CHECKING:
-    # The relative imports below are guarded by TYPE_CHECKING
-    # because they would cause a circular import otherwise.
     from .config_entries import ConfigEntry
     from .helpers import device_registry as dr
     from .helpers.typing import ConfigType
 
 _LOGGER = logging.getLogger(__name__)
 
-#
-# Integration.get_component will check preload platforms and
-# try to import the code to avoid a thundering heard of import
-# executor jobs later in the startup process.
-#
-# default platforms are prepopulated in this list to ensure that
-# by the time the component is loaded, we check if the platform is
-# available.
-#
-# This list can be extended by calling async_register_preload_platform
-#
+# Preload platforms to avoid unnecessary import overhead later during startup.
 BASE_PRELOAD_PLATFORMS = [
     "config",
     "config_flow",
@@ -80,53 +69,26 @@ BASE_PRELOAD_PLATFORMS = [
     "trigger",
 ]
 
-
 @dataclass
 class BlockedIntegration:
-    """Blocked custom integration details."""
-
+    """Details of a blocked custom integration."""
     lowest_good_version: AwesomeVersion | None
     reason: str
 
 
+# Block list of custom integrations that break Home Assistant functionality.
 BLOCKED_CUSTOM_INTEGRATIONS: dict[str, BlockedIntegration] = {
-    # Added in 2024.3.0 because of https://github.com/home-assistant/core/issues/112464
     "start_time": BlockedIntegration(AwesomeVersion("1.1.7"), "breaks Home Assistant"),
-    # Added in 2024.5.1 because of
-    # https://community.home-assistant.io/t/psa-2024-5-upgrade-failure-and-dreame-vacuum-custom-integration/724612
-    "dreame_vacuum": BlockedIntegration(
-        AwesomeVersion("1.0.4"), "crashes Home Assistant"
-    ),
-    # Added in 2024.5.5 because of
-    # https://github.com/sh00t2kill/dolphin-robot/issues/185
-    "mydolphin_plus": BlockedIntegration(
-        AwesomeVersion("1.0.13"), "crashes Home Assistant"
-    ),
-    # Added in 2024.7.2 because of
-    # https://github.com/gcobb321/icloud3/issues/349
-    # Note: Current version 3.0.5.2, the fixed version is a guesstimate,
-    # as no solution is available at time of writing.
-    "icloud3": BlockedIntegration(
-        AwesomeVersion("3.0.5.3"), "prevents recorder from working"
-    ),
-    # Added in 2024.7.2 because of
-    # https://github.com/custom-components/places/issues/289
-    "places": BlockedIntegration(
-        AwesomeVersion("2.7.1"), "prevents recorder from working"
-    ),
-    # Added in 2024.7.2 because of
-    # https://github.com/enkama/hass-variables/issues/120
-    "variable": BlockedIntegration(
-        AwesomeVersion("3.4.4"), "prevents recorder from working"
-    ),
+    "dreame_vacuum": BlockedIntegration(AwesomeVersion("1.0.4"), "crashes Home Assistant"),
+    "mydolphin_plus": BlockedIntegration(AwesomeVersion("1.0.13"), "crashes Home Assistant"),
+    "icloud3": BlockedIntegration(AwesomeVersion("3.0.5.3"), "prevents recorder from working"),
+    "places": BlockedIntegration(AwesomeVersion("2.7.1"), "prevents recorder from working"),
+    "variable": BlockedIntegration(AwesomeVersion("3.4.4"), "prevents recorder from working"),
 }
 
-DATA_COMPONENTS: HassKey[dict[str, ModuleType | ComponentProtocol]] = HassKey(
-    "components"
-)
-DATA_INTEGRATIONS: HassKey[dict[str, Integration | asyncio.Future[None]]] = HassKey(
-    "integrations"
-)
+# Constants for handling various integration components.
+DATA_COMPONENTS: HassKey[dict[str, ModuleType | ComponentProtocol]] = HassKey("components")
+DATA_INTEGRATIONS: HassKey[dict[str, Integration | asyncio.Future[None]]] = HassKey("integrations")
 DATA_MISSING_PLATFORMS: HassKey[dict[str, bool]] = HassKey("missing_platforms")
 DATA_CUSTOM_COMPONENTS: HassKey[
     dict[str, Integration] | asyncio.Future[dict[str, Integration]]
@@ -134,6 +96,7 @@ DATA_CUSTOM_COMPONENTS: HassKey[
 DATA_PRELOAD_PLATFORMS: HassKey[list[str]] = HassKey("preload_platforms")
 PACKAGE_CUSTOM_COMPONENTS = "custom_components"
 PACKAGE_BUILTIN = "homeassistant.components"
+
 CUSTOM_WARNING = (
     "We found a custom integration %s which has not "
     "been tested by Home Assistant. This component might "
@@ -141,10 +104,8 @@ CUSTOM_WARNING = (
     "experience issues with Home Assistant"
 )
 IMPORT_EVENT_LOOP_WARNING = (
-    "We found an integration %s which is configured to "
-    "to import its code in the event loop. This component might "
-    "cause stability problems, be sure to disable it if you "
-    "experience issues with Home Assistant"
+    "We found an integration %s which imports its code in the event loop. "
+    "This might cause stability issues; disable it if you encounter problems."
 )
 
 MOVED_ZEROCONF_PROPS = ("macaddress", "model", "manufacturer")
@@ -152,13 +113,11 @@ MOVED_ZEROCONF_PROPS = ("macaddress", "model", "manufacturer")
 
 class DHCPMatcherRequired(TypedDict, total=True):
     """Matcher for the dhcp integration for required fields."""
-
     domain: str
 
 
 class DHCPMatcherOptional(TypedDict, total=False):
     """Matcher for the dhcp integration for optional fields."""
-
     macaddress: str
     hostname: str
     registered_devices: bool
@@ -170,13 +129,11 @@ class DHCPMatcher(DHCPMatcherRequired, DHCPMatcherOptional):
 
 class BluetoothMatcherRequired(TypedDict, total=True):
     """Matcher for the bluetooth integration for required fields."""
-
     domain: str
 
 
 class BluetoothMatcherOptional(TypedDict, total=False):
     """Matcher for the bluetooth integration for optional fields."""
-
     local_name: str
     service_uuid: str
     service_data_uuid: str
@@ -191,13 +148,11 @@ class BluetoothMatcher(BluetoothMatcherRequired, BluetoothMatcherOptional):
 
 class USBMatcherRequired(TypedDict, total=True):
     """Matcher for the usb integration for required fields."""
-
     domain: str
 
 
 class USBMatcherOptional(TypedDict, total=False):
     """Matcher for the usb integration for optional fields."""
-
     vid: str
     pid: str
     serial_number: str
@@ -212,14 +167,12 @@ class USBMatcher(USBMatcherRequired, USBMatcherOptional):
 @dataclass(slots=True)
 class HomeKitDiscoveredIntegration:
     """HomeKit model."""
-
     domain: str
     always_discover: bool
 
 
 class ZeroconfMatcher(TypedDict, total=False):
     """Matcher for zeroconf."""
-
     domain: str
     name: str
     properties: dict[str, str]
@@ -232,7 +185,6 @@ class Manifest(TypedDict, total=False):
     them may be optional in manifest.json in the sense that they can be omitted
     altogether. But when present, they should not have null values in it.
     """
-
     name: str
     disabled: str
     domain: str
@@ -781,7 +733,7 @@ class Integration:
     @cached_property
     def manifest_json_fragment(self) -> json_fragment:
         """Return manifest as a JSON fragment."""
-        return json_fragment(json_bytes(self.manifest))
+        return json_fragment(json_loads(self.manifest))
 
     @cached_property
     def name(self) -> str:
@@ -1476,15 +1428,6 @@ def _load_file(
         try:
             module = importlib.import_module(path)
 
-            # In Python 3 you can import files from directories that do not
-            # contain the file __init__.py. A directory is a valid module if
-            # it contains a file with the .py extension. In this case Python
-            # will succeed in importing the directory as a module and call it
-            # a namespace. We do not care about namespaces.
-            # This prevents that when only
-            # custom_components/switch/some_platform.py exists,
-            # the import custom_components.switch would succeed.
-            # __file__ was unset for namespaces before Python 3.7
             if getattr(module, "__file__", None) is None:
                 continue
 
@@ -1493,10 +1436,6 @@ def _load_file(
             return cast(ComponentProtocol, module)
 
         except ImportError as err:
-            # This error happens if for example custom_components/switch
-            # exists and we try to load switch.demo.
-            # Ignore errors for custom_components, custom_components.switch
-            # and custom_components.switch.demo.
             white_listed_errors = []
             parts = []
             for part in path.split("."):
@@ -1539,19 +1478,16 @@ class Components:
 
     def __getattr__(self, comp_name: str) -> ModuleWrapper:
         """Fetch a component."""
-        # Test integration cache
         integration = self._hass.data[DATA_INTEGRATIONS].get(comp_name)
 
         if isinstance(integration, Integration):
             component: ComponentProtocol | None = integration.get_component()
         else:
-            # Fallback to importing old-school
             component = _load_file(self._hass, comp_name, _lookup_path(self._hass))
 
         if component is None:
             raise ImportError(f"Unable to load {comp_name}")
 
-        # Local import to avoid circular dependencies
         from .helpers.frame import report  # pylint: disable=import-outside-toplevel
 
         report(
@@ -1580,7 +1516,6 @@ class Helpers:
         """Fetch a helper."""
         helper = importlib.import_module(f"homeassistant.helpers.{helper_name}")
 
-        # Local import to avoid circular dependencies
         from .helpers.frame import report  # pylint: disable=import-outside-toplevel
 
         report(
@@ -1629,17 +1564,12 @@ async def _async_component_dependencies(
             if isinstance(dep_integration, Exception):
                 raise dep_integration
 
-            # If we are already loading it, we have a circular dependency.
-            # We have to check it here to make sure that every integration that
-            # depends on us, does not appear in our own after_dependencies.
             if conflict := loading.intersection(dep_integration.after_dependencies):
                 raise CircularDependency(conflict, dependency_domain)
 
-            # If we have already loaded it, no point doing it again.
             if dependency_domain in loaded:
                 continue
 
-            # If we are already loading it, we have a circular dependency.
             if dependency_domain in loading:
                 raise CircularDependency(dependency_domain, domain)
 
@@ -1657,7 +1587,6 @@ def _async_mount_config_dir(hass: HomeAssistant) -> None:
 
     Async friendly but not a coroutine.
     """
-
     sys.path.insert(0, hass.config.config_dir)
     with suppress(ImportError):
         import custom_components  # pylint: disable=import-outside-toplevel  # noqa: F401
@@ -1690,7 +1619,6 @@ def async_get_issue_tracker(
         "https://github.com/home-assistant/core/issues?q=is%3Aopen+is%3Aissue"
     )
     if not integration and not integration_domain and not module:
-        # If we know nothing about the entity, suggest opening an issue on HA core
         return issue_tracker
 
     if (
